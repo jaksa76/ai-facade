@@ -1,0 +1,4 @@
+{
+    "baseUrl": "https://anapioficeandfire.com/api/",
+    "documentation": "This is the API of Fire and Ice Books. You can use the following API calls:\n    - GET /books: Get all books\n    - GET /books/{id}: Get a book by id\n    - GET /characters: Get all characters\n    - GET /characters?name={name}: Get a character by name\n    - GET /characters?gender={gender}: Get a character by gender\n    - GET /characters/{id}: Get a character by id\n    - GET /houses: Get all houses\n    - GET /houses/{id}: Get a house by id"
+}

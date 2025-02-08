@@ -9,8 +9,22 @@ import fs from 'fs';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Get public folder path from command line arguments
+// Get command line arguments
 const publicFolderPath = process.argv[2] || path.join(__dirname, '../public');
+const apiConfigPath = process.argv[3] || path.join(__dirname, '../apis/fire-and-ice.json');
+
+// Read and validate API configuration
+let api;
+try {
+    const apiConfig = fs.readFileSync(apiConfigPath, 'utf8');
+    api = JSON.parse(apiConfig);
+    if (!api.baseUrl || !api.documentation) {
+        throw new Error('Invalid API configuration: missing baseUrl or documentation');
+    }
+} catch (error) {
+    console.error(`Error: Could not load API configuration from '${apiConfigPath}':`, error.message);
+    process.exit(1);
+}
 
 // Validate if the public folder exists
 if (!fs.existsSync(publicFolderPath)) {
@@ -43,7 +57,7 @@ app.post('/', async (req, res) => {
   res.send(response);
 });
 
-const tools = [{
+const GENERIC_API_TOOLS = [{
   "type": "function",
   "function": {
       "name": "http_get",
@@ -65,37 +79,23 @@ const tools = [{
   }
 }];
 
-async function transformPromptToApiCall(sessionId, prompt) {
+async function transformPromptToApiCall(sessionId, prompt) {  
   try {
-    const systemPromptMsg = {
-      role: 'system', content: `You are an assistant that helps people with calling REST APIs of a specific service.
-      This time we have the API of Fire and Ice Books. You can use the following API calls:
-      - GET /books: Get all books
-      - GET /books/{id}: Get a book by id
-      - GET /characters: Get all characters
-      - GET /characters?name={name}: Get a character by name
-      - GET /characters?gender={gender}: Get a character by gender        
-      - GET /characters/{id}: Get a character by id
-      - GET /houses: Get all houses
-      - GET /houses/{id}: Get a house by id
-    ` }
+    const systemPrompt = `You are an assistant that helps people with calling REST APIs of a specific service.
+      Here is the API documentation:
+      ${api.documentation}
+    `;
 
-    const messageToSend = {
-      role: "user",
-      content: [{ type: "text", text: prompt }],
-    };
-    const messages = [systemPromptMsg, messageToSend];
+    const response = await openai.chat.completions.create({
+      messages: [
+        { role: 'system', content: systemPrompt }, 
+        { role: "user", content: [{ type: "text", text: prompt }] }
+      ],
+      model: "gpt-4o-mini",
+      tools: GENERIC_API_TOOLS,
+    });
 
-    const req = {
-      messages: messages,
-      model: "gpt-3.5-turbo",  // Fix model name
-      tools: tools,
-    }
-    console.log('req:', req);
-    const response = await openai.chat.completions.create(req);
-
-    const resp = response.choices[0].message;
-    return resp;
+    return response.choices[0].message;;
   } catch (error) {
     console.error('Error formulating api call to make:', error);
     return '';
@@ -112,7 +112,7 @@ async function perform(apiCall) {
     const path = args.path;
 
     if (name === 'http_get') {
-      const url = `https://anapioficeandfire.com/api/${path}`;
+      const url = `${api.baseUrl}/${path}`;
       const response = await fetch(url);
       return await response.json();
     } else {
@@ -167,6 +167,9 @@ async function transformApiResponseToResponse(sessionId, prompt, apiCall, apiRes
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log(`Serving static files from: ${publicFolderPath}`);
+  console.log(`API Configuration loaded from: ${apiConfigPath}`);
+  console.log(`Serving UI from: ${publicFolderPath}`);
+  console.log(`Send POST requests to http://localhost:${PORT} or open the UI in your browser`);
+  console.log(`Server running.`);
+  console.log(`Press CTRL+C to stop the server`);
 });
