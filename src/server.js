@@ -104,19 +104,17 @@ async function transformPromptToApiCall(sessionId, prompt) {
 
 async function perform(apiCall) {
   try {
-    console.log('apiCall', apiCall);
     const f = apiCall.tool_calls[0].function;
-    console.log('f', f);
-    const name = f.name;
+    const method = f.name;
     const args = JSON.parse(f.arguments);
     const path = args.path;
 
-    if (name === 'http_get') {
+    if (method === 'http_get') {
       const url = `${api.baseUrl}/${path}`;
       const response = await fetch(url);
       return await response.json();
     } else {
-      console.error('Usupported function:', name);
+      console.error('Usupported function:', method);
       return '';
     }
   } catch (error) {
@@ -126,38 +124,29 @@ async function perform(apiCall) {
 
 async function transformApiResponseToResponse(sessionId, prompt, apiCall, apiResponse) {
   try {
-    const systemPromptMsg = {
-      role: 'system', content: `You are an assistant that helps people with calling REST APIs of a specific service.
+    const systemPrompt = `You are an assistant that helps people with calling REST APIs of a specific service.
       You help translating from HTTP responses to human-readable responses. You generate plain text responses 
       that are easy to understand. No JSON, XML or MarkDown, just plain text.
-    ` };
+    `;
 
-    const text = `I asked the following question: 
-
+    const requestText = `I asked the following question: 
     ${prompt}
-    
     I made the following API call:
-    
     ${JSON.stringify(apiCall)}
-    
     The API responded with:
-
     ${JSON.stringify(apiResponse)}
-
     Please help me translate this response to a human-readable response.
-    `
+    `;
 
-    const messageToSend = { role: "user", content: [{ type: "text", text: text }] };
-    const messages = [systemPromptMsg, messageToSend];
-    const req = {
-      messages: messages,
+    const response = await openai.chat.completions.create({
+      messages: [
+        { role: 'system', content: systemPrompt }, 
+        { role: "user", content: [{ type: "text", text: requestText }] }
+      ],
       model: "gpt-4o-mini"
-    }
-    console.log('req:', req);
-    const response = await openai.chat.completions.create(req);
+    });
 
-    const humanReadableResponse = response.choices[0].message;
-    return humanReadableResponse.content;
+    return response.choices[0].message.content;
   } catch (error) {
     console.error('Error formulating api call to make:', error);
     return '';
