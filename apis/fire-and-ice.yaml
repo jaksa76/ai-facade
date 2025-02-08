@@ -1,0 +1,11 @@
+baseUrl: https://anapioficeandfire.com/api/
+documentation: |
+    This is the API of Fire and Ice Books. You can use the following API calls:
+    - GET /books: Get all books
+    - GET /books/{id}: Get a book by id
+    - GET /characters: Get all characters
+    - GET /characters?name={name}: Get a character by name
+    - GET /characters?gender={gender}: Get a character by gender
+    - GET /characters/{id}: Get a character by id
+    - GET /houses: Get all houses
+    - GET /houses/{id}: Get a house by id

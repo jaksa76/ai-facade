@@ -4,10 +4,11 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "start": "bun run --watch src/server.js public apis/fire-and-ice.json"
+    "start": "bun run --watch src/server.js public apis/hacker-news.yaml"
   },
   "dependencies": {
     "express": "^4.18.2",
+    "js-yaml": "^4.1.0",
     "openai": "^4.20.1"
   }
 }

@@ -5,19 +5,20 @@ import { dirname } from 'path';
 import bodyParser from 'body-parser';
 import OpenAI from 'openai';
 import fs from 'fs';
+import yaml from 'js-yaml';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 // Get command line arguments
 const publicFolderPath = process.argv[2] || path.join(__dirname, '../public');
-const apiConfigPath = process.argv[3] || path.join(__dirname, '../apis/fire-and-ice.json');
+const apiConfigPath = process.argv[3] || path.join(__dirname, '../apis/fire-and-ice.yml');
 
 // Read and validate API configuration
 let api;
 try {
     const apiConfig = fs.readFileSync(apiConfigPath, 'utf8');
-    api = JSON.parse(apiConfig);
+    api = yaml.load(apiConfig);
     if (!api.baseUrl || !api.documentation) {
         throw new Error('Invalid API configuration: missing baseUrl or documentation');
     }
@@ -49,12 +50,53 @@ app.use(express.static(publicFolderPath));
 // Use body-parser middleware for text
 app.use(bodyParser.text({ type: '*/*' }));
 
+function logError(context, error, details = {}) {
+  console.error(`[ERROR] ${context}:`, {
+    message: error.message,
+    stack: error.stack,
+    ...details
+  });
+}
+
+function logRequest(method, path, body) {
+  console.log(`[REQUEST] ${method} ${path}`, body ? {
+    body: body.length > 1000 ? body.substring(0, 1000) + '...' : body
+  } : '');
+}
+
+function logResponse(status, body) {
+  console.log(`[RESPONSE] Status: ${status}`, {
+    body: typeof body === 'string' && body.length > 1000 ? 
+      body.substring(0, 1000) + '...' : body
+  });
+}
+
 app.post('/', async (req, res) => {
-  const prompt = req.body;
-  const apiCall = await transformPromptToApiCall(1, prompt);
-  const apiResponse = await perform(apiCall);
-  const response = await transformApiResponseToResponse(1, prompt, apiCall, apiResponse);
-  res.send(response);
+  try {
+    logRequest('POST', '/', req.body);
+    const prompt = req.body;
+    
+    const apiCall = await transformPromptToApiCall(1, prompt);
+    if (!apiCall) {
+      throw new Error('Failed to transform prompt to API call');
+    }
+
+    const apiResponse = await perform(apiCall);
+    if (!apiResponse) {
+      throw new Error('API call failed');
+    }
+
+    const response = await transformApiResponseToResponse(1, prompt, apiCall, apiResponse);
+    if (!response) {
+      throw new Error('Failed to transform API response');
+    }
+
+    logResponse(200, response);
+    res.send(response);
+  } catch (error) {
+    logError('Request handler', error, { prompt: req.body });
+    res.status(500).send(`Error processing request: ${error.message}`);
+  }
 });
 
 const GENERIC_API_TOOLS = [{
@@ -117,8 +159,8 @@ async function transformPromptToApiCall(sessionId, prompt) {
 
     return response.choices[0].message;;
   } catch (error) {
-    console.error('Error formulating api call to make:', error);
-    return '';
+    logError('Transform prompt to API call', error, { prompt });
+    return null;
   }
 }
 
@@ -147,8 +189,8 @@ async function perform(apiCall) {
       return '';
     }
   } catch (error) {
-    console.error('Error performing api call:', error);
-    return '';
+    logError('Perform API call', error, { apiCall });
+    return null;
   }
 }
 
@@ -178,8 +220,8 @@ async function transformApiResponseToResponse(sessionId, prompt, apiCall, apiRes
 
     return response.choices[0].message.content;
   } catch (error) {
-    console.error('Error formulating api call to make:', error);
-    return '';
+    logError('Transform API response', error, { prompt, apiCall, apiResponse });
+    return null;
   }
 }
 
