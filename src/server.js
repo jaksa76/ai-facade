@@ -88,11 +88,11 @@ const GENERIC_API_TOOLS = [{
                   "description": "the path to be appended to the base url"
               },
               "body": {
-                  "type": "object",
-                  "description": "the JSON body to be sent with the POST request"
+                  "type": "string",
+                  "description": "the body to be sent with the POST request"
               }
           },
-          "required": ["path"],
+          "required": ["path", "body"],
           "additionalProperties": false
       },
       "strict": true
