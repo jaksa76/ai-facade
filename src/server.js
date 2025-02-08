@@ -170,11 +170,14 @@ async function perform(apiCall) {
     const method = f.name;
     const args = JSON.parse(f.arguments);
     const path = args.path;
-    const url = `${api.baseUrl}/${path}`;
+    const url = `${api.baseUrl}${path}`;
 
     if (method === 'http_get') {
+      console.log('Performing GET request to:', url);
       const response = await fetch(url);
-      return await response.json();
+      const responseBody = await response.text();
+      console.log(responseBody);
+      return responseBody;
     } else if (method === 'http_post') {
       const response = await fetch(url, {
         method: 'POST',
