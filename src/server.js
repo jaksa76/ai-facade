@@ -71,39 +71,13 @@ function logResponse(status, body) {
   });
 }
 
-app.post('/', async (req, res) => {
-  try {
-    logRequest('POST', '/', req.body);
-    const prompt = req.body;
-    
-    const apiCall = await transformPromptToApiCall(1, prompt);
-    if (!apiCall) {
-      throw new Error('Failed to transform prompt to API call');
-    }
-
-    const apiResponse = await perform(apiCall);
-    if (!apiResponse) {
-      throw new Error('API call failed');
-    }
-
-    const response = await transformApiResponseToResponse(1, prompt, apiCall, apiResponse);
-    if (!response) {
-      throw new Error('Failed to transform API response');
-    }
-
-    logResponse(200, response);
-    res.send(response);
-  } catch (error) {
-    logError('Request handler', error, { prompt: req.body });
-    res.status(500).send(`Error processing request: ${error.message}`);
-  }
-});
+const MAX_CALLS_PER_PROMPT = 5;
 
 const GENERIC_API_TOOLS = [{
   "type": "function",
   "function": {
       "name": "http_get",
-      "description": "Perform an HTTP GET request to the specified path with the specified url parameters and return the response body as a string.",
+      "description": "Perform an HTTP GET request. Can be used in sequence with other calls when needed. The response may contain data needed for subsequent calls.",
       "parameters": {
           "type": "object",
           "properties": {
@@ -144,6 +118,13 @@ const GENERIC_API_TOOLS = [{
 async function transformPromptToApiCall(sessionId, prompt) {  
   try {
     const systemPrompt = `You are an assistant that helps people with calling REST APIs of a specific service.
+      You have three options:
+      1. If the request can be answered directly without API calls, provide a direct response.
+      2. If the request needs a single API call, specify that call.
+      3. If the request needs multiple sequential API calls (up to ${MAX_CALLS_PER_PROMPT}), plan them in sequence.
+         For example, if you need to get a list of IDs first and then get details for each ID.
+      
+      The API base URL is: ${api.baseUrl}
       Here is the API documentation:
       ${api.documentation}
     `;
@@ -151,18 +132,99 @@ async function transformPromptToApiCall(sessionId, prompt) {
     const response = await openai.chat.completions.create({
       messages: [
         { role: 'system', content: systemPrompt }, 
-        { role: "user", content: [{ type: "text", text: prompt }] }
+        { role: "user", content: prompt }
       ],
       model: "gpt-4o-mini",
       tools: GENERIC_API_TOOLS,
     });
 
-    return response.choices[0].message;;
+    const message = response.choices[0].message;
+    
+    // Direct response case
+    if (!message.tool_calls) {
+      return { direct_response: true, content: message.content };
+    }
+
+    // API calls case
+    return message;
   } catch (error) {
     logError('Transform prompt to API call', error, { prompt });
     return null;
   }
 }
+
+async function processApiCalls(message, initialPrompt) {
+  try {
+    let allResponses = [];
+    let currentMessage = message;
+    
+    for (let i = 0; i < MAX_CALLS_PER_PROMPT; i++) {
+      if (!currentMessage.tool_calls) break;
+      
+      // Perform the current API call
+      const apiResponse = await perform(currentMessage);
+      if (!apiResponse) throw new Error(`API call ${i + 1} failed`);
+      allResponses.push(apiResponse);
+
+      // Check if more calls are needed
+      if (i < MAX_CALLS_PER_PROMPT - 1) {
+        const nextResponse = await openai.chat.completions.create({
+          messages: [
+            { role: "system", content: "Based on the previous API response, determine if and what additional API calls are needed." },
+            { role: "user", content: initialPrompt },
+            { role: "assistant", content: JSON.stringify(currentMessage) },
+            { role: "user", content: `Previous API response: ${JSON.stringify(apiResponse)}. Are additional API calls needed?` }
+          ],
+          model: "gpt-4o-mini",
+          tools: GENERIC_API_TOOLS,
+        });
+        
+        currentMessage = nextResponse.choices[0].message;
+        if (!currentMessage.tool_calls) break;
+      }
+    }
+    
+    return allResponses;
+  } catch (error) {
+    logError('Process API calls', error);
+    return null;
+  }
+}
+
+app.post('/', async (req, res) => {
+  try {
+    logRequest('POST', '/', req.body);
+    const prompt = req.body;
+    
+    const transformResult = await transformPromptToApiCall(1, prompt);
+    if (!transformResult) {
+      throw new Error('Failed to transform prompt');
+    }
+
+    // Handle direct response
+    if (transformResult.direct_response) {
+      logResponse(200, transformResult.content);
+      return res.send(transformResult.content);
+    }
+
+    // Handle API calls
+    const apiResponses = await processApiCalls(transformResult, prompt);
+    if (!apiResponses) {
+      throw new Error('API calls failed');
+    }
+
+    const response = await transformApiResponseToResponse(1, prompt, transformResult, apiResponses);
+    if (!response) {
+      throw new Error('Failed to transform API response');
+    }
+
+    logResponse(200, response);
+    res.send(response);
+  } catch (error) {
+    logError('Request handler', error, { prompt: req.body });
+    res.status(500).send(`Error processing request: ${error.message}`);
+  }
+});
 
 async function perform(apiCall) {
   try {
@@ -197,20 +259,19 @@ async function perform(apiCall) {
   }
 }
 
-async function transformApiResponseToResponse(sessionId, prompt, apiCall, apiResponse) {
+async function transformApiResponseToResponse(sessionId, prompt, apiCall, apiResponses) {
   try {
     const systemPrompt = `You are an assistant that helps people with calling REST APIs of a specific service.
       You help translating from HTTP responses to human-readable responses. You generate plain text responses 
       that are easy to understand. No JSON, XML or MarkDown, just plain text.
+      If multiple API calls were made, combine their results into a coherent response.
     `;
 
     const requestText = `I asked the following question: 
     ${prompt}
-    I made the following API call:
-    ${JSON.stringify(apiCall)}
-    The API responded with:
-    ${JSON.stringify(apiResponse)}
-    Please help me translate this response to a human-readable response.
+    The API calls and responses were:
+    ${JSON.stringify({ calls: apiCall, responses: apiResponses })}
+    Please help me translate these responses to a human-readable response.
     `;
 
     const response = await openai.chat.completions.create({
@@ -223,11 +284,10 @@ async function transformApiResponseToResponse(sessionId, prompt, apiCall, apiRes
 
     return response.choices[0].message.content;
   } catch (error) {
-    logError('Transform API response', error, { prompt, apiCall, apiResponse });
+    logError('Transform API response', error, { prompt, apiCall, apiResponses });
     return null;
   }
 }
-
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
