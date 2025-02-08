@@ -4,9 +4,19 @@ import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import bodyParser from 'body-parser';
 import OpenAI from 'openai';
+import fs from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+
+// Get public folder path from command line arguments
+const publicFolderPath = process.argv[2] || path.join(__dirname, '../public');
+
+// Validate if the public folder exists
+if (!fs.existsSync(publicFolderPath)) {
+  console.error(`Error: Public folder '${publicFolderPath}' does not exist`);
+  process.exit(1);
+}
 
 const app = express();
 
@@ -19,8 +29,8 @@ app.use((req, res, next) => {
   next();
 });
 
-// Serve static files from public directory at project root
-app.use(express.static(path.join(__dirname, '../public')));
+// Serve static files from the specified public directory
+app.use(express.static(publicFolderPath));
 
 // Use body-parser middleware for text
 app.use(bodyParser.text({ type: '*/*' }));
@@ -158,4 +168,5 @@ async function transformApiResponseToResponse(sessionId, prompt, apiCall, apiRes
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  console.log(`Serving static files from: ${publicFolderPath}`);
 });
