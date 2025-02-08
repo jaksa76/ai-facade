@@ -70,9 +70,29 @@ const GENERIC_API_TOOLS = [{
                   "description": "the path to be appended to the base url"
               }
           },
-          "required": [
-              "path"
-          ],
+          "required": ["path"],
+          "additionalProperties": false
+      },
+      "strict": true
+  }
+}, {
+  "type": "function",
+  "function": {
+      "name": "http_post",
+      "description": "Perform an HTTP POST request to the specified path with the specified body and return the response body as a string.",
+      "parameters": {
+          "type": "object",
+          "properties": {
+              "path": {
+                  "type": "string",
+                  "description": "the path to be appended to the base url"
+              },
+              "body": {
+                  "type": "object",
+                  "description": "the JSON body to be sent with the POST request"
+              }
+          },
+          "required": ["path"],
           "additionalProperties": false
       },
       "strict": true
@@ -108,17 +128,27 @@ async function perform(apiCall) {
     const method = f.name;
     const args = JSON.parse(f.arguments);
     const path = args.path;
+    const url = `${api.baseUrl}/${path}`;
 
     if (method === 'http_get') {
-      const url = `${api.baseUrl}/${path}`;
       const response = await fetch(url);
       return await response.json();
+    } else if (method === 'http_post') {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: args.body ? JSON.stringify(args.body) : undefined
+      });
+      return await response.json();
     } else {
-      console.error('Usupported function:', method);
+      console.error('Unsupported function:', method);
       return '';
     }
   } catch (error) {
     console.error('Error performing api call:', error);
+    return '';
   }
 }
 
